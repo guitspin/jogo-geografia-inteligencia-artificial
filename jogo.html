@@ -1,0 +1,251 @@
+import React, { useMemo, useState, useEffect } from "react";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Toggle } from "@/components/ui/toggle";
+import { motion, AnimatePresence } from "framer-motion";
+import { Circle, X as XIcon, RotateCcw, Brain, Users, Trophy } from "lucide-react";
+
+// ---------- Utilidades ----------
+const LINES = [
+  [0, 1, 2],
+  [3, 4, 5],
+  [6, 7, 8],
+  [0, 3, 6],
+  [1, 4, 7],
+  [2, 5, 8],
+  [0, 4, 8],
+  [2, 4, 6],
+];
+
+function calculateWinner(board) {
+  for (const [a, b, c] of LINES) {
+    if (board[a] && board[a] === board[b] && board[a] === board[c]) {
+      return { player: board[a], line: [a, b, c] };
+    }
+  }
+  return null;
+}
+
+function emptyIndices(board) {
+  return board.map((v, i) => (v ? null : i)).filter((x) => x !== null);
+}
+
+// Estratégia simples para CPU: ganhar -> bloquear -> centro -> cantos -> laterais
+function cpuMove(board, cpuSymbol, humanSymbol) {
+  const empties = emptyIndices(board);
+  if (empties.length === 0) return null;
+
+  const tryLine = (sym) => {
+    for (const [a, b, c] of LINES) {
+      const line = [board[a], board[b], board[c]];
+      const countSym = line.filter((x) => x === sym).length;
+      const countEmpty = line.filter((x) => !x).length;
+      if (countSym === 2 && countEmpty === 1) {
+        const idx = [a, b, c][line.indexOf(null)];
+        return idx;
+      }
+    }
+    return null;
+  };
+
+  // 1) vencer
+  let move = tryLine(cpuSymbol);
+  if (move !== null) return move;
+
+  // 2) bloquear
+  move = tryLine(humanSymbol);
+  if (move !== null) return move;
+
+  // 3) centro
+  if (!board[4]) return 4;
+
+  // 4) cantos
+  const corners = [0, 2, 6, 8].filter((i) => !board[i]);
+  if (corners.length) return corners[Math.floor(Math.random() * corners.length)];
+
+  // 5) laterais
+  const sides = [1, 3, 5, 7].filter((i) => !board[i]);
+  if (sides.length) return sides[Math.floor(Math.random() * sides.length)];
+
+  return empties[0];
+}
+
+const Cell = ({ value, onClick, highlight }) => (
+  <button
+    onClick={onClick}
+    className={`relative aspect-square w-full rounded-2xl border transition 
+      ${highlight ? "border-emerald-500 shadow-[0_0_0_3px_rgba(16,185,129,0.35)]" : "border-zinc-700"}
+      bg-zinc-900 hover:bg-zinc-800 active:scale-[0.98]`}
+  >
+    <AnimatePresence mode="wait" initial={false}>
+      {value && (
+        <motion.div
+          key={value}
+          initial={{ scale: 0, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          exit={{ scale: 0, opacity: 0 }}
+          transition={{ type: "spring", stiffness: 300, damping: 20 }}
+          className="flex items-center justify-center h-full"
+        >
+          {value === "X" ? <XIcon className="w-14 h-14" /> : <Circle className="w-14 h-14" />}
+        </motion.div>
+      )}
+    </AnimatePresence>
+  </button>
+);
+
+function ScoreBoard({ score, mode, onResetAll }) {
+  return (
+    <div className="grid grid-cols-3 gap-2 items-center">
+      <div className="flex items-center gap-2">
+        <Badge className="text-sm px-3 py-1">X</Badge>
+        <span className="text-xl font-semibold">{score.X}</span>
+      </div>
+      <div className="flex items-center justify-center gap-2">
+        <Trophy className="w-5 h-5" />
+        <span className="text-sm opacity-80">{mode === "cpu" ? "vs CPU" : "2 Jogadores"}</span>
+      </div>
+      <div className="flex items-center gap-2 justify-end">
+        <Badge className="text-sm px-3 py-1">O</Badge>
+        <span className="text-xl font-semibold">{score.O}</span>
+      </div>
+      <div className="col-span-3 flex justify-center mt-2">
+        <Button variant="secondary" onClick={onResetAll} className="gap-2">
+          <RotateCcw className="w-4 h-4" /> Reiniciar placar
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+export default function TicTacToeGame() {
+  const [board, setBoard] = useState(Array(9).fill(null));
+  const [xIsNext, setXIsNext] = useState(true);
+  const [mode, setMode] = useState("cpu"); // "cpu" | "pvp"
+  const [score, setScore] = useState({ X: 0, O: 0 });
+  const [winningLine, setWinningLine] = useState(null);
+  const [status, setStatus] = useState("Sua vez!");
+  const [lock, setLock] = useState(false);
+
+  const currentPlayer = xIsNext ? "X" : "O";
+  const humanIs = "X"; // humano sempre começa para simplicidade
+  const cpuIs = humanIs === "X" ? "O" : "X";
+
+  const winnerInfo = useMemo(() => calculateWinner(board), [board]);
+  const isDraw = useMemo(() => !winnerInfo && board.every(Boolean), [board, winnerInfo]);
+
+  useEffect(() => {
+    if (winnerInfo) {
+      setWinningLine(winnerInfo.line);
+      setStatus(`Vitória de ${winnerInfo.player}!`);
+      setScore((s) => ({ ...s, [winnerInfo.player]: s[winnerInfo.player] + 1 }));
+      setLock(true);
+      return;
+    }
+    if (isDraw) {
+      setStatus("Empate!");
+      setLock(true);
+      return;
+    }
+
+    if (mode === "cpu" && currentPlayer === cpuIs) {
+      setStatus("CPU pensando...");
+      setLock(true);
+      const t = setTimeout(() => {
+        const move = cpuMove(board, cpuIs, humanIs);
+        if (move !== null && !board[move]) {
+          const next = board.slice();
+          next[move] = cpuIs;
+          setBoard(next);
+          setXIsNext(!xIsNext);
+        }
+        setLock(false);
+      }, 400);
+      return () => clearTimeout(t);
+    } else {
+      setStatus(`Vez de ${currentPlayer}`);
+    }
+  }, [board, winnerInfo, isDraw, mode, currentPlayer, cpuIs, humanIs, xIsNext]);
+
+  function handleClick(i) {
+    if (board[i] || winnerInfo || lock) return;
+    const next = board.slice();
+    next[i] = currentPlayer;
+    setBoard(next);
+    setXIsNext(!xIsNext);
+  }
+
+  function resetBoard() {
+    setBoard(Array(9).fill(null));
+    setXIsNext(true);
+    setWinningLine(null);
+    setStatus("Sua vez!");
+    setLock(false);
+  }
+
+  function resetAll() {
+    resetBoard();
+    setScore({ X: 0, O: 0 });
+  }
+
+  return (
+    <div className="min-h-[70vh] w-full grid place-items-center p-4 bg-gradient-to-b from-zinc-950 to-zinc-900 text-zinc-100">
+      <Card className="w-full max-w-xl bg-zinc-950/70 backdrop-blur border-zinc-800 shadow-xl">
+        <CardHeader className="pb-2">
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-2xl md:text-3xl font-bold tracking-tight flex items-center gap-3">
+              <span className="inline-flex h-9 w-9 items-center justify-center rounded-2xl bg-zinc-900 border border-zinc-800">
+                <XIcon className="w-5 h-5" />
+              </span>
+              <span>Jogo da Velha</span>
+            </CardTitle>
+            <div className="flex items-center gap-2">
+              <Toggle
+                pressed={mode === "cpu"}
+                onPressedChange={(v) => {
+                  setMode(v ? "cpu" : "pvp");
+                  resetBoard();
+                }}
+                className="gap-2"
+              >
+                {mode === "cpu" ? <Brain className="w-4 h-4" /> : <Users className="w-4 h-4" />}
+                <span className="text-sm">{mode === "cpu" ? "CPU" : "2P"}</span>
+              </Toggle>
+              <Button variant="outline" onClick={resetBoard} className="gap-2">
+                <RotateCcw className="w-4 h-4" /> Nova rodada
+              </Button>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <div className="grid gap-6">
+            <div className="grid grid-cols-3 gap-3">
+              {board.map((val, i) => (
+                <Cell
+                  key={i}
+                  value={val}
+                  onClick={() => handleClick(i)}
+                  highlight={winningLine ? winningLine.includes(i) : false}
+                />
+              ))}
+            </div>
+
+            <div className="flex items-center justify-between">
+              <div className="text-lg md:text-xl font-medium">
+                {status}
+              </div>
+              <div>
+                <ScoreBoard score={score} mode={mode} onResetAll={resetAll} />
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      <div className="mt-6 max-w-xl text-center text-sm opacity-80">
+        Dica: clique no botão "CPU" para alternar entre jogar contra o computador ou jogar no modo 2 jogadores (turnos no mesmo dispositivo). O humano começa como X.
+      </div>
+    </div>
+  );
+}
